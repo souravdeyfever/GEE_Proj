@@ -1,0 +1,82 @@
+Using MODIS Cropland, and World Population data calculating Per capita Cropland Pressure
+Keywords: Zonal statistic, Cropland, Population
+
+print('Unite of the output is : m²/person');
+
+
+// Import WorldPop population data
+var population = ee.ImageCollection("WorldPop/GP/100m/pop_age_sex_cons_unadj")
+                .select('population')
+                .mosaic(); // Combine all images into one
+Map.addLayer(population, {}, 'Population');
+// Import MODIS LULC data
+var modisLULC = ee.ImageCollection('MODIS/006/MCD12Q1')
+                 .filter(ee.Filter.date('2011-01-01', '2011-12-31'))
+                 .first()
+                 .select('LC_Type1'); // Select the land cover type band
+
+// Extract cropland (class 12 in MODIS LULC)
+var cropland = modisLULC.eq(12).rename('cropland');
+Map.addLayer(cropland, {}, 'Crop');
+
+
+// Calculate cropland area in each district
+var districtCroplandArea = cropland.multiply(ee.Image.pixelArea())
+  .reduceRegions({
+    collection: districts,
+    reducer: ee.Reducer.sum(),
+    scale: 500,
+    crs: 'EPSG:4326'
+  }).map(function(feature) {
+    return feature.set('cropland_area', feature.get('sum'));
+  });
+
+// Calculate population in each district
+var districtPopulation = population.reduceRegions({
+  collection: districts,
+  reducer: ee.Reducer.sum(),
+  scale: 100,
+  crs: 'EPSG:4326'
+}).map(function(feature) {
+  return feature.set('population', feature.get('sum'));
+});
+
+// Merge cropland area and population data
+var districtData = districtCroplandArea.map(function(feature) {
+  var population = ee.Feature(districtPopulation.filter(ee.Filter.eq('District', feature.get('District'))).first()).get('population');
+  return feature.set('population', population);
+});
+
+// Calculate per capita cropland pressure
+var perCapitaCroplandPressure = districtData.map(function(feature) {
+  var croplandArea = ee.Number(feature.get('cropland_area'));
+  var population = ee.Number(feature.get('population'));
+  var pressure = croplandArea.divide(population);
+  return feature.set('per_capita_cropland_pressure', pressure);
+});
+
+
+// Export the data to a CSV file
+Export.table.toDrive({
+  collection: perCapitaCroplandPressure,
+  description: 'District_Population_Cropland_Data',
+  fileFormat: 'CSV'
+});
+
+// Define visualization parameters
+var visParams = {
+  min: 0,
+  max: 1000, // Adjust the max value as per your data
+  palette: ['blue', 'green', 'yellow', 'orange', 'red']
+};
+
+// Add the choropleth map to the map
+Map.addLayer(perCapitaCroplandPressure, {palet:visParams}, 'Per Capita Cropland Pressure');
+//Map.centerObject(districts, 6);
+
+Export.table.toDrive({
+  collection: perCapitaCroplandPressure,
+  description: 'District_Population_Cropland_Data',
+  fileFormat: 'CSV'
+});
+
