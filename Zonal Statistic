@@ -1,0 +1,72 @@
+var table =  aoi
+Map.addLayer(table, {}, 'AOI');
+Map.centerObject(table,6);
+
+var sentinel2 = ee.ImageCollection('COPERNICUS/S2_HARMONIZED');
+var image = sentinel2.filterBounds(table) .filterDate('2023-12-01','2023-12-20') .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 25))
+                     
+print(image, 'image');
+var image = image.mosaic().clip(table)
+
+var NDVI = image.expression('(a-b)/(a+b)',{ a :image.select('B8'),b :image.select('B4')}).rename("NDVI");
+var NDVI = NDVI.updateMask(image2);
+
+Map.addLayer(NDVI,{},'NDVI');
+
+var means = NDVI.reduceRegion({
+  geometry: table.geometry(),
+  reducer: ee.Reducer.mean(),
+  scale: 1000,
+});
+means = means.get('NDVI')
+print('means',means);
+
+Export.table.toDrive({
+    collection: means, 
+    description: 'GOA_means_try', 
+    folder: 'AAAAA_try', 
+    fileNamePrefix: 'GOA_Means_try', 
+    fileFormat: 'CSV'
+})
+
+var zonal = NDVI.reduceRegion({
+  geometry: table,
+  reducer: ee.Reducer.mean(),
+  scale: 1000,
+});
+
+print(zonal,'zonal');
+
+
+
+
+
+
+// var means = NDVI.reduceRegions({
+//   collection: table,
+//   reducer: ee.Reducer.mean(),
+//   scale: 10,
+// });
+// means = means.get('ndvi')
+// print('Madhya Pradesh',means);
+
+// var means = NDVI.reduceRegions({
+//   collection: table,
+//   reducer: ee.Reducer.mean(),
+//   scale: 100,
+// });
+// means = means.get('ndvi')
+// print(means,'means');
+
+//--------------
+
+
+// the resulting mean is a FeatureCollection
+// so you can export it as a table
+// Export.table.toDrive({
+//     collection: means, 
+//     description: 'Some Description', 
+//     folder: 'Some_folder', 
+//     fileNamePrefix: 'name_of_the_file', 
+//     fileFormat: 'CSV'
+// })
