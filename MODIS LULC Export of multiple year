@@ -1,0 +1,73 @@
+//----------------------------------------------------
+//             import table/shapefile/aoi
+//              my aoi named Jharkhand
+//----------------------------------------------------
+
+
+// Load MODIS Land Cover data for Jharkhand
+var lulc = ee.ImageCollection('MODIS/006/MCD12Q1')
+            .filter(ee.Filter.date('2001-01-01', '2020-12-31'))
+            .select('LC_Type1')
+            .filterBounds(jharkhand);
+
+// Define a color palette for the land cover classes
+var lulcColors = [
+  '05450a', // Evergreen Needleleaf Forests
+  '086a10', // Evergreen Broadleaf Forests
+  '54a708', // Deciduous Needleleaf Forests
+  '78d203', // Deciduous Broadleaf Forests
+  '009900', // Mixed Forests
+  'c6b044', // Closed Shrublands
+  'dcd159', // Open Shrublands
+  'dade48', // Woody Savannas
+  'fbff13', // Savannas
+  'b6ff05', // Grasslands
+  '27ff87', // Permanent Wetlands
+  'c24f44', // Croplands
+  'a5a5a5', // Urban and Built-Up
+  'ff6d4c', // Cropland/Natural Vegetation Mosaics
+  '69fff8', // Snow and Ice
+  'f9ffa4', // Barren or Sparsely Vegetated
+  '1c0dff'  // Water Bodies
+];
+
+// Create a dictionary to hold the land cover class names and their corresponding colors
+var lulcDict = ee.Dictionary.fromLists(
+  ee.List([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]),
+  ee.List(lulcColors)
+);
+
+// Define a function to mask out non-vegetation pixels
+var maskVegetation = function(image) {
+  var mask = image.select('LC_Type1').neq(0);
+  return image.updateMask(mask);
+};
+
+// Apply the maskVegetation function to each image in the collection
+var lulcMasked = lulc.map(maskVegetation);
+
+// Create a visualization for the land cover classes
+var lulcVis = {
+  min: 0,
+  max: 17,
+  palette: lulcColors
+};
+
+// Create a list of years for which to export land cover data
+var years = ee.List([2001, 2005, 2010, 2015, 2020]);
+
+// Loop through each year in the list and export the corresponding land cover data
+years.getInfo().forEach(function(year) {
+  var image = lulcMasked.filterDate(year + '-01-01', year + '-12-31').mosaic();
+  Map.addLayer(image.clip(jharkhand), lulcVis, year.toString());
+  
+  // Export the land cover data to Google Drive
+  Export.image.toDrive({
+    image: image.clip(jharkhand),
+    description: 'MODIS_LULC_Jharkhand_' + year.toString(),
+    folder: 'GEE_exports',
+    scale: 500,
+    region: jharkhand,
+    crs: 'EPSG:4326'
+  });
+});
