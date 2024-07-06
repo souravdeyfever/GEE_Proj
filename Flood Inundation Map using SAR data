@@ -1,0 +1,71 @@
+// Define the region of interest (ROI)
+
+// Define date ranges for pre-flood and during-flood periods
+var preFloodStart = '2024-05-15';
+var preFloodEnd = '2024-05-30';
+var duringFloodStart = '2024-06-20';
+var duringFloodEnd = '2024-06-30';
+
+// Function to mask out non-water areas using thresholding
+function waterMask(image) {
+  var threshold = -15; // Example threshold value for water detection
+  
+  // Apply threshold to identify water pixels
+  var water = image.select('VV').lt(threshold);
+  
+  // Mask out non-water areas
+  return image.updateMask(water);
+}
+
+// Function to calculate median for pre-flood and first for during-flood
+function calculateMedianFirst(collection, start_date, end_date) {
+  return collection
+    .filterDate(start_date, end_date)
+    .median()
+    .toFloat();
+}
+
+// Load Sentinel-1 SAR data
+var collection = ee.ImageCollection('COPERNICUS/S1_GRD')
+  .filterBounds(roi)
+  .filter(ee.Filter.eq('instrumentMode', 'IW'))
+  .filter(ee.Filter.eq('orbitProperties_pass', 'DESCENDING'))
+  .select(['VV'])
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'));
+
+// Calculate median image for pre-flood period
+var preFloodImage = calculateMedianFirst(collection, preFloodStart, preFloodEnd);
+
+// Calculate first image for during-flood period
+var duringFloodImage = collection
+  .filterDate(duringFloodStart, duringFloodEnd)
+  .first()
+  .toFloat();
+
+// Apply water mask function to pre-flood and during-flood images
+var preFloodWater = waterMask(preFloodImage);
+var duringFloodWater = waterMask(duringFloodImage);
+
+// Detect flood pixels by subtracting pre-flood water bodies from during-flood water pixels
+var floodPixels = duringFloodWater.subtract(preFloodWater);
+var floodMask = floodPixels.gt(0); // Mask for flood pixels
+
+// Visualization parameters
+// Visualization parameters
+
+
+// Display layers on the map
+Map.centerObject(roi, 10);
+Map.addLayer(preFloodWater, {min: 0, max: 1, palette: ['blue']}, 'Permanent Water Bodies');
+Map.addLayer(duringFloodWater, {min: 0, max: 1, palette: ['red']}, 'During Flood Water');
+Map.addLayer(floodMask, {palette: ['#B8860B']}, 'Flood Pixels'); // Use hexadecimal color code for dark yellow
+Map.addLayer(preFloodImage, {}, 'Sentinel-1 SAR Image');
+
+// Export the flood map as an image (optional)
+Export.image.toDrive({
+  image: floodMask.toFloat(),
+  description: 'flood_extent_map',
+  folder: 'SAR_outputs',
+  region: roi,
+  scale: 10
+});
