@@ -1,3 +1,6 @@
+
+//  import or draw geometry/ study area
+
 // Load Sentinel-2 ImageCollection
 var sentinel2 =ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
                   .filterDate('2020-01-01', '2020-12-31')
