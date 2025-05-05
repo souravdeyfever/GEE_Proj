@@ -1,0 +1,49 @@
+
+//import geometry / study area
+
+// Load Sentinel-2 ImageCollection
+var sentinel2 =ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
+                  .filterDate('2020-01-01', '2020-12-31')
+                  .filterBounds(geometry) // Bangalore, India
+                  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
+                  .median(); // Taking the median composite to reduce cloud impact
+
+// Sentinel-2 bands
+// B2: Blue (490 nm)
+// B3: Green (560 nm)
+// B4: Red (665 nm)
+// B8: NIR (842 nm)
+// B11: SWIR1 (1610 nm)
+// B12: SWIR2 (2190 nm)
+
+// Calculate NDVI (Normalized Difference Vegetation Index)
+// NDVI = (NIR - Red) / (NIR + Red)
+var ndvi = sentinel2.normalizedDifference(['B8', 'B4']).rename('NDVI');
+
+// Calculate NDWI (Normalized Difference Water Index)
+// NDWI = (NIR - SWIR1) / (NIR + SWIR1)
+var ndwi = sentinel2.normalizedDifference(['B8', 'B11']).rename('NDWI');
+
+// Calculate NDSI (Normalized Difference Snow Index)
+// NDSI = (Green - SWIR1) / (Green + SWIR1)
+var ndsi = sentinel2.normalizedDifference(['B3', 'B11']).rename('NDSI');
+
+// Calculate EVI (Enhanced Vegetation Index)
+// EVI = 2.5 * ((NIR - Red) / (NIR + 6*Red - 7.5*Blue + 1))
+
+// Calculate NDBI (Normalized Difference Built-up Index)
+// NDBI = (SWIR1 - NIR) / (SWIR1 + NIR)
+var ndbi = sentinel2.normalizedDifference(['B11', 'B8']).rename('NDBI');
+
+// Add all indices to the map
+Map.centerObject(sentinel2, 10);
+Map.addLayer(ndvi, {min: 0, max: 1, palette: ['blue', 'white', 'green']}, 'NDVI');
+Map.addLayer(ndwi, {min: -1, max: 1, palette: ['white', 'blue']}, 'NDWI');
+Map.addLayer(ndsi, {min: -1, max: 1, palette: ['white', 'green']}, 'NDSI');
+Map.addLayer(ndbi, {min: -1, max: 1, palette: ['white', 'yellow', 'red']}, 'NDBI');
+
+// Display results
+print('NDVI:', ndvi);
+print('NDWI:', ndwi);
+print('NDSI:', ndsi);
+print('NDBI:', ndbi);
