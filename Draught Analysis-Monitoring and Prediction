@@ -1,0 +1,173 @@
+// ----------------------------
+// Author: Sourav Dey
+// ----------------------------
+// var aoi = /* add your geometry */;
+var startYear = 2001;
+var endYear = 2024;
+
+// ----------------------------
+// 1. LOAD DATA
+// ----------------------------
+
+// MODIS NDVI (MOD13Q1 - 16-day, scale to monthly)
+var modis = ee.ImageCollection("MODIS/061/MOD13Q1")
+  .select("NDVI")
+  .filterBounds(aoi)
+  .filterDate(startYear + '-01-01', endYear + '-12-31');
+
+// CHIRPS precipitation
+var chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
+  .select("precipitation")
+  .filterBounds(aoi)
+  .filterDate(startYear + '-01-01', endYear + '-12-31');
+
+// Optional ERA5 soil moisture (surface)
+var soil = ee.ImageCollection("ECMWF/ERA5_LAND/HOURLY")
+  .select("volumetric_soil_water_layer_1")
+  .filterBounds(aoi)
+  .filterDate(startYear + '-01-01', endYear + '-12-31');
+
+// ----------------------------
+// 2. MONTHLY AGGREGATION
+// ----------------------------
+function monthlyComposite(ic, reducer, scaleFactor) {
+  return ee.ImageCollection(
+    ee.List.sequence(startYear, endYear).map(function(y) {
+      return ee.List.sequence(1, 12).map(function(m) {
+        var start = ee.Date.fromYMD(y, m, 1);
+        var end = start.advance(1, 'month');
+        var img = ic.filterDate(start, end).reduce(reducer);
+        return img.multiply(scaleFactor)
+          .set('year', y)
+          .set('month', m)
+          .set('system:time_start', start.millis());
+      });
+    }).flatten()
+  );
+}
+
+// NDVI monthly mean (scale factor 0.0001)
+var ndviMonthly = monthlyComposite(modis, ee.Reducer.mean(), 0.0001);
+
+// Precipitation monthly sum (mm)
+var precipMonthly = monthlyComposite(chirps, ee.Reducer.sum(), 1);
+
+// Soil moisture monthly mean (optional)
+var soilMonthly = monthlyComposite(soil, ee.Reducer.mean(), 1);
+
+// ----------------------------
+// 3. BASELINE (2001–2014)
+// ----------------------------
+var baselineStart = 2001;
+var baselineEnd = 2014;
+
+var ndviBaseline = ndviMonthly.filter(ee.Filter.calendarRange(baselineStart, baselineEnd, 'year'));
+var precipBaseline = precipMonthly.filter(ee.Filter.calendarRange(baselineStart, baselineEnd, 'year'));
+
+// ----------------------------
+// 4. VCI CALCULATION
+// ----------------------------
+var ndviMin = ndviBaseline.reduce(ee.Reducer.percentile([5])); // 5th percentile
+var ndviMax = ndviBaseline.reduce(ee.Reducer.percentile([95])); // 95th percentile
+
+function addVCI(img) {
+  var vci = img.subtract(ndviMin).divide(ndviMax.subtract(ndviMin))
+    .rename('VCI').clamp(0, 1);
+  return img.addBands(vci);
+}
+var ndviVCI = ndviMonthly.map(addVCI);
+
+// ----------------------------
+// 5. PRECIP ANOMALY & SPI
+// ----------------------------
+var precipMean = precipBaseline.reduce(ee.Reducer.mean());
+var precipStd = precipBaseline.reduce(ee.Reducer.stdDev());
+
+function addPrecipIndices(img) {
+  var anomaly = img.subtract(precipMean).rename('Prec_Anom');
+  var spi = img.subtract(precipMean).divide(precipStd).rename('SPI');
+  return img.addBands([anomaly, spi]);
+}
+var precipSPI = precipMonthly.map(addPrecipIndices);
+
+// ----------------------------
+// 6. DROUGHT FLAG
+// ----------------------------
+function droughtFlag(ndviImg, precipImg) {
+  var vci = ndviImg.select('VCI');
+  var drought = vci.lt(0.4).rename('Drought_Flag'); // 1 if drought
+  return ndviImg.addBands([precipImg.select('SPI'), drought]);
+}
+
+// Align collections by date
+var combined = ee.ImageCollection(
+  ee.Join.inner().apply({
+    primary: ndviVCI,
+    secondary: precipSPI,
+    condition: ee.Filter.equals({
+      leftField: 'system:time_start',
+      rightField: 'system:time_start'
+    })
+  }).map(function(feature) {
+    return droughtFlag(
+      ee.Image(feature.get('primary')),
+      ee.Image(feature.get('secondary'))
+    );
+  })
+);
+
+// ----------------------------
+// 7. TIME SERIES PLOTS
+// ----------------------------
+var ndviChart = ui.Chart.image.series({
+  imageCollection: ndviVCI.select('VCI'),
+  region: aoi,
+  reducer: ee.Reducer.mean(),
+  scale: 5000,
+  xProperty: 'system:time_start'
+}).setOptions({
+  title: 'VCI Time Series',
+  vAxis: {title: 'VCI'},
+  hAxis: {title: 'Date'},
+  lineWidth: 2
+});
+print(ndviChart);
+
+var spiChart = ui.Chart.image.series({
+  imageCollection: precipSPI.select('SPI'),
+  region: aoi,
+  reducer: ee.Reducer.mean(),
+  scale: 5000,
+  xProperty: 'system:time_start'
+}).setOptions({
+  title: 'SPI Time Series',
+  vAxis: {title: 'SPI'},
+  hAxis: {title: 'Date'},
+  lineWidth: 2
+});
+print(spiChart);
+
+// ----------------------------
+// 8. MAP LAYERS
+// ----------------------------
+var exampleMonth = combined.first();
+Map.centerObject(aoi, 7);
+Map.addLayer(exampleMonth.select('VCI'), {min: 0, max: 1, palette: ['brown', 'yellow', 'green']}, 'VCI Example(author: sourav dey)');
+Map.addLayer(exampleMonth.select('SPI'), {min: -2, max: 2, palette: ['red', 'white', 'blue']}, 'SPI Example(author: sourav dey)');
+Map.addLayer(exampleMonth.select('Drought_Flag'), {min: 0, max: 1, palette: ['white', 'red']}, 'Drought Flag Example(author: sourav dey)');
+print(('author: sourav dey')
+// ----------------------------
+// 9. EXPORT FOR ML (XGBoost)
+// ----------------------------
+Export.table.toDrive({
+  collection: combined.map(function(img) {
+    var meanDict = img.reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: aoi,
+      scale: 5000
+    });
+    return ee.Feature(null, meanDict.set('time', img.date().format('YYYY-MM')));
+  }),
+  description: 'Drought_Indices_Table',
+  fileFormat: 'CSV'
+});
