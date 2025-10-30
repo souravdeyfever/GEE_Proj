@@ -1,4 +1,4 @@
-// Define the region of interest (ROI)
+// Define the region of interest (roi)
 
 // Define date ranges for pre-flood and during-flood periods
 var preFloodStart = '2024-05-15';
