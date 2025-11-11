@@ -1,0 +1,63 @@
+// Define your training data shapefile(LS)
+var trainingData =                 // add input shapefile of your active ls points of baspa
+  // Add your feature data here, including a 'class' property for classification
+  // and the various input features (bands)
+  ee.Feature(null, {'class': 0, 'band1': 10, 'band2': 20, 'band3': 30}),
+  ee.Feature(null, {'class': 1, 'band1': 15, 'band2': 25, 'band3': 35}),
+  // ... more training data
+]);
+
+var inputFeatures = ['band1', 'band2', 'band3']; // Replace with your actual feature names
+var classProperty = 'class'; // Replace with your actual class property name
+
+// Train the Random Forest classifier
+var rfModel = ee.Classifier.smileRandomForest({
+  numberOfTrees: 100, // You can adjust the number of trees
+  variablesPerSplit: 0, // Or specify a number, e.g., 2
+  minLeafPopulation: 1,
+  bagFraction: 0.5,
+  maxNodes: null,
+  seed: 0
+}).train({
+  features: trainingData,
+  classProperty: classProperty,
+  inputProperties: inputFeatures
+});
+
+// Get the explanation of the model, which includes feature importance
+var rfExplanation = rfModel.explain();
+
+// Extract the 'importance' dictionary
+var featureImportance = ee.Dictionary(rfExplanation).get('importance');
+
+// Print the feature importance
+print('Feature Importance:', featureImportance);
+
+// You can also convert it to a list of features and their importances for sorting or visualization
+var importanceList = ee.Dictionary(featureImportance).keys().map(function(key) {
+  return ee.Feature(null, {
+    'feature': key,
+    'importance': ee.Dictionary(featureImportance).get(key)
+  });
+});
+
+// Sort the features by importance (descending)
+var sortedImportance = ee.FeatureCollection(importanceList).sort('importance', false);
+
+print('Sorted Feature Importance:', sortedImportance);
+
+
+
+// ----------------- Variable's Important Plotting -------------------------
+
+
+var RFmodel = ee.Classifier.smileRandomForest(1000).train(trainingData, 'classID', predictionBands);
+
+var RFexp = RFmodel.explain()
+
+var VarImp = ee.Feature(null, ee.Dictionary(RFexp).get('importance'));
+print('Variable Importance:', VarImp)
+
+
+//________________________________________________________
+https://developers.google.com/earth-engine/apidocs/ee-classifier-smilerandomforest
